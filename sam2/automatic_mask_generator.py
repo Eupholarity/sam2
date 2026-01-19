@@ -35,26 +35,43 @@ from sam2.utils.amg import (
 
 class SAM2AutomaticMaskGenerator:
     def __init__(
-        self,
-        model: SAM2Base,
-        points_per_side: Optional[int] = 32,
-        points_per_batch: int = 64,
-        pred_iou_thresh: float = 0.8,
-        stability_score_thresh: float = 0.95,
-        stability_score_offset: float = 1.0,
-        mask_threshold: float = 0.0,
-        box_nms_thresh: float = 0.7,
-        crop_n_layers: int = 0,
-        crop_nms_thresh: float = 0.7,
-        crop_overlap_ratio: float = 512 / 1500,
-        crop_n_points_downscale_factor: int = 1,
-        point_grids: Optional[List[np.ndarray]] = None,
-        min_mask_region_area: int = 0,
-        output_mode: str = "binary_mask",
-        use_m2m: bool = False,
-        multimask_output: bool = True,
-        **kwargs,
-    ) -> None:
+            self,
+            model: SAM2Base,
+            points_per_side: Optional[int] = 32, # Chinese: SAM沿着图像一边网格点（Prompt点）的数量，用来寻找物体。点越多，搜索越彻底，但速度越慢。（例如，64意味着在图像上放置64x64=4096个点）
+                                                # English: How many grid points SAM should use along one side of the image to look for objects. More points = more thorough search, but slower. (e.g., 64 means 64x64=4096 points over the image).
+            points_per_batch: int = 32,         # Chinese: SAM每次处理的这些网格点的数量。数字越大可能越快，但需要更多的计算机内存（GPU内存）。
+                                                # English: How many of these grid points SAM processes at the same time. Higher number can be faster but needs more computer memory (GPU RAM).
+            pred_iou_thresh: float = 0.8,       # Chinese: SAM认为一个Mask（分割掩码）质量有多好（0到1之间）。预测质量低于此数字的Mask会被丢弃。值越高=过滤越严格。
+                                                # English: How good SAM thinks a mask is (0 to 1). Masks with a predicted quality below this number are thrown away. Higher = stricter filtering.
+            stability_score_thresh: float = 0.95, # Chinese: 衡量Mask质量的另一个指标。它检查Mask边界在微小调整时变化了多少。低于此分数且过于“不稳定”（抖动）的Mask会被丢弃。值越高=过滤越严格。
+                                                # English: Another measure of mask quality. It checks how much the mask changes if you slightly tweak its boundary. Masks that are too "wiggly" (unstable) below this score are thrown away. Higher = stricter filtering.
+            stability_score_offset: float = 1.0, # Chinese: 计算“稳定性分数”时使用的一个技术设置。它会稍微调整Mask边界，以查看其稳定性。
+                                                # English: A technical setting used when calculating the "stability score." It slightly adjusts the mask boundary to see how stable it is.
+            mask_threshold: float = 0.0,        # Chinese: SAM内部用于将其原始Mask预测（连续值）转换为清晰的“开”或“关”（二值）Mask的截止值。默认0.0表示使用标准的0.5概率截止。
+                                                # English: The internal cutoff value SAM uses to turn its raw mask prediction (continuous values) into a clear "on" or "off" (binary) mask. Default 0.0 means using the standard 0.5 probability cutoff.
+            box_nms_thresh: float = 0.7,        # Chinese: 用于处理重叠Mask的“非极大值抑制”。如果两个Mask在很大程度上覆盖了同一个物体（它们的边界框重叠超过这个百分比），则只保留质量更好的那个。避免重复检测。
+                                                # English: "Non-Maximum Suppression" for overlapping masks. If two masks largely cover the same object (their bounding boxes overlap by more than this percentage), keep only the better one. Avoids duplicate detections.
+            crop_n_layers: int = 0,             # Chinese: SAM应该额外分析的图像放大区域（裁剪块）的“层数”。这有助于找到在完整图像上可能被忽略的小物体。（0=不裁剪，1=一层裁剪等）
+                                                # English: How many "layers" of zoomed-in image sections (crops) SAM should also analyze. This helps find small objects that might be missed on the full image. (0 = no crops, 1 = one layer of crops, etc.).
+            crop_nms_thresh: float = 0.7,       # Chinese: 类似于box_nms_thresh，但专门用于移除来自不同放大区域（裁剪块）的重复Mask。
+                                                # English: Similar to box_nms_thresh, but specifically for removing duplicate masks that come from different zoomed-in sections (crops) of the image.
+            crop_overlap_ratio: float = 512 / 1500, # Chinese: 图像放大区域（裁剪块）之间应该有多少重叠。重叠越多有助于确保物体不会正好在裁剪块边界处被切断。
+                                                # English: How much the zoomed-in image sections (crops) should overlap with each other. More overlap helps ensure objects aren't cut exactly at a crop boundary.
+            crop_n_points_downscale_factor: int = 1, # Chinese: 在分析放大区域（裁剪块）时，每个裁剪块中的网格点数量应该减少多少。（例如，2表示第一层裁剪块中的点数减半，第二层减至四分之一等）
+                                                # English: When analyzing zoomed-in sections (crops), how much to reduce the number of grid points in each crop. (e.g., 2 means half the points in the first layer of crops, a quarter in the second, etc.).
+            point_grids: Optional[List[np.ndarray]] = None, # Chinese: 你可以提供自己特定的点列表供SAM检查，而不是使用'points_per_side'来创建网格。（通常保留为None）
+                                                # English: Instead of using 'points_per_side' to create a grid, you can provide your own specific list of points for SAM to check. (Usually left as None).
+            min_mask_region_area: int = 0,      # Chinese: 创建Mask后，任何小于此像素面积的微小分离部分或Mask内部的孔洞都会被移除，以使其更整洁。（需要安装OpenCV）
+                                                # English: After creating masks, any tiny detached bits or holes inside a mask smaller than this pixel area will be removed to clean it up. (Requires OpenCV installed).
+            output_mode: str = "binary_mask",   # Chinese: 最终Mask的输出格式。“binary_mask”为每个Mask提供一个清晰的开/关图像。其他选项用于更紧凑的存储。
+                                                # English: What format the final masks should be in. "binary_mask" gives a clear on/off image for each mask. Other options are for more compact storage.
+            use_m2m: bool = False,              # Chinese: SAM是否应该尝试利用先前生成的Mask信息来改进其Mask。可以提高结果，但可能更慢。
+                                                # English: Whether SAM should try to refine its masks by using previously generated mask information. Can improve results but might be slower.
+            multimask_output: bool = True,      # Chinese: 对于每个网格点，SAM有时可能会为同一个物体预测几个略有不同的Mask。如果为True，它会考虑所有这些选项。
+                                                # English: For each grid point, SAM can sometimes suggest a few slightly different masks for an object. If True, it considers all these options.
+            **kwargs,                           # Chinese: 任何未在此处列出的、SAM2模型可能理解的其他高级设置。
+                                                # English: Any other advanced settings not listed here that the SAM2 model might understand.
+        ) -> None:
         """
         Using a SAM 2 model, generates masks for the entire image.
         Generates a grid of point prompts over the image, then filters

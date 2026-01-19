@@ -26,7 +26,7 @@ class SAM2Base(torch.nn.Module):
         memory_attention,
         memory_encoder,
         num_maskmem=7,  # default 1 input frame + 6 previous frames
-        image_size=512,
+        image_size=64,
         backbone_stride=16,  # stride of the image backbone output
         sigmoid_scale_for_mem_enc=1.0,  # scale factor for mask sigmoid prob
         sigmoid_bias_for_mem_enc=0.0,  # bias factor for mask sigmoid prob

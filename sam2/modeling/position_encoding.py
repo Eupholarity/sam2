@@ -28,7 +28,7 @@ class PositionEmbeddingSine(nn.Module):
         # Following settings only relevant
         # for warmping up cache for compilation
         warmup_cache: bool = True,
-        image_size: int = 1024,
+        image_size: int = 512,
         strides: Tuple[int] = (4, 8, 16, 32),
     ):
         super().__init__()
